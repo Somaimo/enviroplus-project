@@ -7,6 +7,7 @@ Type=idle
 Restart=on-failure
 User=pi
 Group=pi
+WorkingDirectory=/home/pi/environment
 ExecStart=/usr/bin/python3 /home/pi/environment/enviro.py
 KillSignal=SIGINT
 

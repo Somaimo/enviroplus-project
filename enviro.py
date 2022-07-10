@@ -4,9 +4,6 @@
 ## displays them on the 0.96" Display.
 ## It updates the display every 30 seconds and sends the data to a InfluxDB instance.
 ##
-## This script is not meant to be complete nor properly optimized, it is just a 
-## proof of concept.
-##
 ## Copyright Marc Winkler - ETH Zurich - 01-07-2022
 
 from smbus import SMBus
@@ -16,6 +13,8 @@ from PIL import Image, ImageDraw, ImageFont
 from enviroplus import gas
 import sys
 import time
+import influxdbdata
+
 
 # Changes these vars to your infrastructure
 BGCOLOR=(0, 0, 0) #Black Background
@@ -28,6 +27,8 @@ INFLUXDB_URL="https://influxdb.phys.ethz.ch/"
 INFLUXDB_USER="test"
 INFLUXDB_PW="test"
 INFLUXDB_DB="itl-metrics-tst"
+apprentice="marc"
+room="hcp_g_38-2"
 
 bus = SMBus(1)
 bme280 = BME280(i2c_dev=bus)
@@ -51,22 +52,27 @@ fontData =  ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 fontGas =  ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", FONTSIZE_GAS)
 colour = (255,255,255)
 bgimg = Image.new('RGB', (WIDTH, HEIGHT), color=BGCOLOR)
-#  Define the seperation lines (vertical), one 49 Pixels from the left and the other 106 Pixels from the left.
 sep1 = [(49, 0), (49, 48)]
 sep2 = [(106, 0), (106, 48)]
-# Define the separation line (horizontal) 48 Pixels from the top.
 sep3 = [(0, 48), (160, 48)]
-# Create the drawing object (this does not display anything)
 draw = ImageDraw.Draw(bgimg)
+title = "Enviro:"
 
-def print_sensor_data():
+
+
+def print_sensor_data(sendToInflux=False):
     # We reduce the accuracy of the sensor output to zero or one digit after the
     # the comma. This does not round the number or does any kind of mathematical calc.
-    temperature = "{:.1f}C".format(bme280.get_temperature())
-    humidity    = "{:.1f}%".format(bme280.get_humidity())
-    pressure    = "{:.0f}hPa".format(bme280.get_pressure())
+    temperature = float("{:.1f}".format(bme280.get_temperature()))
+    humidity    = float("{:.1f}".format(bme280.get_humidity()))
+    pressure    = int("{:.0f}".format(bme280.get_pressure()))
     gasData     = gas.read_all()
-    gasData     = gasData.reducing / 1000
+    gasData     = float(gasData.reducing / 1000)
+    if sendToInflux:
+        influxdbdata.send_data(data=temperature,measurement="temperature",apprentice=apprentice,room=room)
+        influxdbdata.send_data(data=humidity,measurement="humidity",apprentice=apprentice,room=room)
+        influxdbdata.send_data(data=pressure,measurement="pressure",apprentice=apprentice,room=room)
+        influxdbdata.send_data(data=gasData,measurement="gas-co2",apprentice=apprentice,room=room)
     # The following lines are here to draw all the necessary things on the display.
     # It's a lot, but if you look at the comments, it all makes sense.
     # Draw a black rectangle to clear the screen, everytime before displaying new data.
@@ -83,9 +89,9 @@ def print_sensor_data():
     draw.text((133, 2), "P", font=fontTitle, fill=colour,anchor="ma")
     # The next three lines draw the environment sensor readings and we anchor them
     # differently, to make it easier to scale.
-    draw.text((24, 45), temperature, font=fontData, fill=colour, anchor="md")
-    draw.text((77, 45), humidity, font=fontData, fill=colour, anchor="md")
-    draw.text((156, 45), pressure, font=fontData, fill=colour, anchor="rd")
+    draw.text((24, 45), "{}C".format(temperature), font=fontData, fill=colour, anchor="md")
+    draw.text((77, 45), "{}%".format(humidity), font=fontData, fill=colour, anchor="md")
+    draw.text((156, 45), "{}hPa".format(pressure), font=fontData, fill=colour, anchor="rd")
     # If the CO2 Gas sensor records a reducing value equal or below 500, there is
     # too much Co2 in the air. Windows should be openened.
     if (gasData <= 500):
@@ -99,10 +105,16 @@ def print_sensor_data():
     # Draw the generated image onto the display.
     disp.display(bgimg)
 
+wait_seconds=15
 try:
     while True:
         time.sleep(1)
-        print_sensor_data()
+        if wait_seconds == 0:
+            print_sensor_data(sendToInflux=True)
+            wait_seconds=15
+        else:
+            print_sensor_data()
+        wait_seconds-= 1
 # Turn off backlight on control-c
 except KeyboardInterrupt:
     disp.set_backlight(0)
